@@ -1,0 +1,9 @@
+build/
+tb/sim_build_*/
+tb/results.xml
+tb/__pycache__/
+tb/coverage_*.txt
+sw/*.elf
+sw/*.bin
+*.vcd
+*.fst
