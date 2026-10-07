@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run riscv-formal on one of the cores in this repo.
 #   formal/run.sh single [make targets]     single-cycle core (riscv_core)
+#   formal/run.sh pipeline [make targets]   5-stage pipeline (riscv_pipeline)
 # Work happens in build/formal/ so the riscv-formal submodule stays clean.
 # Results: build/formal/cores/rv32i_<core>/checks/*/status
 set -euo pipefail
