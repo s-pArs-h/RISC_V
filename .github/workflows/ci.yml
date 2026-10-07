@@ -21,9 +21,9 @@ jobs:
           pip install "cocotb>=2.0,<3"
       - name: Lint
         run: make lint
-      - name: riscv-tests (RV32UI)
+      - name: riscv-tests RV32UI (both cores)
         run: make isa
-      - name: Random lockstep test
+      - name: Random lockstep test (both cores)
         run: make random
       - name: FPGA top level simulation
         run: make fpga-sim
@@ -36,7 +36,7 @@ jobs:
           path: |
             tb/coverage_*.txt
             tb/results.xml
-            build/synth_riscv_core.txt
+            build/synth_riscv_*.txt
 
   riscv-formal:
     runs-on: ubuntu-24.04
