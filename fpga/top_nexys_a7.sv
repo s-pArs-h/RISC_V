@@ -1,21 +1,26 @@
 `default_nettype none
 
-// Nexys A7 (Artix-7) top level for the single-cycle core.
+// Nexys A7 (Artix-7) top level for either core.
+//
+//   PIPELINED = 0  single-cycle core; RAM with combinational reads
+//                  (distributed RAM), 50 MHz by default
+//   PIPELINED = 1  5-stage pipeline; RAM with registered reads (block RAM),
+//                  100 MHz by default
 //
 //   clock   100 MHz board oscillator -> MMCM -> CORE_MHZ core clock
 //   reset   CPU_RESETN button, synchronised to the core clock
-//   memory  MEM_WORDS x 32-bit on-chip RAM (distributed RAM: the single-cycle
-//           core needs combinational reads), loaded from INIT_FILE
+//   memory  MEM_WORDS x 32-bit on-chip RAM loaded from INIT_FILE
 //   I/O     0x8000_0000  write: LED[15:0]
 //           0x8000_0004  read:  SW[15:0]
 //           LED16_R lights when the core has halted (trap)
 //
 // Define SIM to replace the MMCM with the board clock for simulation.
 module top_nexys_a7 #(
+    parameter PIPELINED = 0,
     parameter MEM_WORDS = 1024,                 // 4 KiB
     parameter INIT_FILE = "demo.hex",
     /* verilator lint_off UNUSEDPARAM */
-    parameter CORE_MHZ  = 50                    // unused when SIM bypasses the MMCM
+    parameter CORE_MHZ  = (PIPELINED != 0) ? 100 : 50  // unused when SIM bypasses the MMCM
     /* verilator lint_on UNUSEDPARAM */
 ) (
     input  wire        CLK100MHZ,
@@ -76,13 +81,25 @@ module top_nexys_a7 #(
     wire [3:0]  dmem_wmask;
     wire        halted;
 
-    riscv_core u_core (
-        .clk(clk), .rst_n(rst_n),
-        .imem_addr(imem_addr), .imem_rdata(imem_rdata),
-        .dmem_addr(dmem_addr), .dmem_re(dmem_re), .dmem_wmask(dmem_wmask),
-        .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
-        .halted(halted)
-    );
+    generate
+        if (PIPELINED != 0) begin : g_pipe
+            riscv_pipeline u_core (
+                .clk(clk), .rst_n(rst_n),
+                .imem_addr(imem_addr), .imem_rdata(imem_rdata),
+                .dmem_addr(dmem_addr), .dmem_re(dmem_re), .dmem_wmask(dmem_wmask),
+                .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
+                .halted(halted)
+            );
+        end else begin : g_single
+            riscv_core u_core (
+                .clk(clk), .rst_n(rst_n),
+                .imem_addr(imem_addr), .imem_rdata(imem_rdata),
+                .dmem_addr(dmem_addr), .dmem_re(dmem_re), .dmem_wmask(dmem_wmask),
+                .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
+                .halted(halted)
+            );
+        end
+    endgenerate
 
     // ------------------------------------------------------------------
     // Memory and I/O
@@ -92,14 +109,36 @@ module top_nexys_a7 #(
     logic [31:0] mem [0:MEM_WORDS-1];
     initial $readmemh(INIT_FILE, mem);
 
-    assign imem_rdata = mem[imem_addr[AW+1:2]];
-    wire [31:0] ram_rdata = mem[dmem_addr[AW+1:2]];
+    wire [AW-1:0] iaddr = imem_addr[AW+1:2];
+    wire [AW-1:0] daddr = dmem_addr[AW+1:2];
 
+    // Writes: one byte lane per enable bit
     genvar b;
     generate
         for (b = 0; b < 4; b = b + 1) begin : g_lane
             always_ff @(posedge clk)
-                if (!is_io && dmem_wmask[b]) mem[dmem_addr[AW+1:2]][8*b +: 8] <= dmem_wdata[8*b +: 8];
+                if (!is_io && dmem_wmask[b]) mem[daddr][8*b +: 8] <= dmem_wdata[8*b +: 8];
+        end
+    endgenerate
+
+    // Reads: combinational for the single-cycle core, registered (block RAM
+    // with the I/O read registered alongside) for the pipeline
+    generate
+        if (PIPELINED != 0) begin : g_sync_read
+            logic [31:0] imem_q, ram_q;
+            logic [15:0] sw_q;
+            logic        io_q;
+            always_ff @(posedge clk) begin
+                imem_q <= mem[iaddr];
+                ram_q  <= mem[daddr];
+                sw_q   <= SW;
+                io_q   <= is_io;
+            end
+            assign imem_rdata = imem_q;
+            assign dmem_rdata = io_q ? {16'h0000, sw_q} : ram_q;
+        end else begin : g_comb_read
+            assign imem_rdata = mem[iaddr];
+            assign dmem_rdata = is_io ? {16'h0000, SW} : mem[daddr];
         end
     endgenerate
 
@@ -108,8 +147,7 @@ module top_nexys_a7 #(
         else if (is_io && dmem_wmask != 4'b0 && dmem_addr[2] == 1'b0) LED <= dmem_wdata[15:0];
     end
 
-    assign dmem_rdata = is_io ? {16'h0000, SW} : ram_rdata;
-    assign LED16_R    = halted;
+    assign LED16_R = halted;
 
 endmodule
 

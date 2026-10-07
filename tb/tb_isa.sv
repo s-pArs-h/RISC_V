@@ -1,6 +1,9 @@
 `timescale 1ns/1ps
 `default_nettype none
 
+`ifndef MEM_SYNC
+`define MEM_SYNC 0               // 1 for the pipelined core (block-RAM timing)
+`endif
 `ifndef CORE
 `define CORE riscv_core          // which core to test (overridden with -D)
 `endif
@@ -21,7 +24,7 @@ module tb_isa;
     wire [3:0]  dmem_wmask;
     wire        dmem_re, halted;
 
-    sim_mem u_mem (
+    sim_mem #(.SYNC(`MEM_SYNC)) u_mem (
         .clk(clk),
         .imem_addr(imem_addr), .imem_rdata(imem_rdata),
         .dmem_addr(dmem_addr), .dmem_wmask(dmem_wmask),

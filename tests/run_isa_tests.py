@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build and run the official riscv-tests RV32UI suite on the core.
 
-    python3 tests/run_isa_tests.py                 # all tests, single-cycle core
-    python3 tests/run_isa_tests.py add beq lw      # a subset
-    python3 tests/run_isa_tests.py --core <module> --gp <hier.path>
+    python3 tests/run_isa_tests.py                     # all tests, single-cycle core
+    python3 tests/run_isa_tests.py --core pipeline     # pipelined core
+    python3 tests/run_isa_tests.py add beq lw          # a subset
 
 Each test is assembled with riscv64-unknown-elf-gcc against the minimal
 environment in tests/env, converted to a hex image and run on tb/tb_isa.sv
@@ -31,8 +31,13 @@ lb lbu lh lhu lw ld_st lui or ori sb sh sw st_ld sll slli
 slt slti sltiu sltu sra srai srl srli sub xor xori
 """.split()
 
-CORE_SOURCES = ["riscv_decoder.sv", "riscv_imm_gen.sv", "riscv_alu.sv",
-                "riscv_regfile.sv", "riscv_lsu.sv", "riscv_core.sv"]
+COMMON = ["riscv_decoder.sv", "riscv_imm_gen.sv", "riscv_alu.sv",
+          "riscv_regfile.sv", "riscv_lsu.sv"]
+CORES = {
+    # name: (top module, extra source, synchronous memory)
+    "single":   ("riscv_core", "riscv_core.sv", 0),
+    "pipeline": ("riscv_pipeline", "riscv_pipeline.sv", 1),
+}
 
 
 def run(cmd, **kw):
@@ -56,10 +61,11 @@ def build_test(name):
     return hexf
 
 
-def compile_tb(core, gp, sources):
+def compile_tb(core, gp, sources, sync):
     sim = BUILD / f"tb_{core}.vvp"
     BUILD.mkdir(parents=True, exist_ok=True)
     run(["iverilog", "-g2012", "-I", str(ROOT / "rtl"), f"-DCORE={core}", f"-DGP_REG={gp}",
+         f"-DMEM_SYNC={sync}",
          "-o", str(sim), str(ROOT / "tb" / "sim_mem.sv"), str(ROOT / "tb" / "tb_isa.sv"),
          *[str(ROOT / "rtl" / s) for s in sources]])
     return sim
@@ -75,19 +81,18 @@ def run_test(sim, name):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tests", nargs="*", default=RV32UI)
-    ap.add_argument("--core", default="riscv_core")
-    ap.add_argument("--gp", default="u_rf.regs[3]")
-    ap.add_argument("--sources", nargs="*", default=CORE_SOURCES)
+    ap.add_argument("--core", choices=CORES, default="single")
     args = ap.parse_args()
 
-    sim = compile_tb(args.core, args.gp, args.sources)
+    top, src, sync = CORES[args.core]
+    sim = compile_tb(top, "u_rf.regs[3]", COMMON + [src], sync)
     with cf.ThreadPoolExecutor() as pool:
         results = list(pool.map(lambda t: run_test(sim, t), args.tests))
 
     failed = [r for r in results if not r[1].startswith("PASS")]
     for name, res in results:
         print(f"  {name:<8} {res}")
-    print(f"{len(results) - len(failed)}/{len(results)} riscv-tests passed on {args.core}")
+    print(f"{len(results) - len(failed)}/{len(results)} riscv-tests passed on {top}")
     sys.exit(1 if failed else 0)
 
 

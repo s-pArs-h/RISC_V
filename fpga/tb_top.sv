@@ -1,8 +1,12 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Simulation check of the FPGA top level and demo program (compile with -DSIM).
+// Simulation check of the FPGA top level and demo program (compile with -DSIM,
+// and -DPIPELINED=1 for the pipelined core).
 // Sets the switches, lets the program run and checks LED[7:0] = popcount(SW).
+`ifndef PIPELINED
+`define PIPELINED 0
+`endif
 module tb_top;
     reg clk = 0, rstn = 0;
     reg [15:0] sw;
@@ -10,7 +14,7 @@ module tb_top;
     wire halted;
     always #5 clk = ~clk;
 
-    top_nexys_a7 #(.INIT_FILE("fpga/demo.hex")) dut (
+    top_nexys_a7 #(.PIPELINED(`PIPELINED), .INIT_FILE("fpga/demo.hex")) dut (
         .CLK100MHZ(clk), .CPU_RESETN(rstn), .SW(sw), .LED(led), .LED16_R(halted)
     );
 
@@ -41,7 +45,8 @@ module tb_top;
             $display("FAIL: core halted");
             errors = errors + 1;
         end
-        if (errors == 0) $display("PASS: LEDs show popcount(SW), counter LED[15:8]=%h", led[15:8]);
+        if (errors == 0 && `PIPELINED) $display("PASS (pipeline): LEDs show popcount(SW)");
+        if (errors == 0 && !`PIPELINED) $display("PASS (single-cycle): LEDs show popcount(SW)");
         $finish;
     end
 endmodule

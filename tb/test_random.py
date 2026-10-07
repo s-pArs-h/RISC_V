@@ -21,6 +21,7 @@ from coverage import cov
 from iss import RV32I
 
 SEED = int(os.environ.get("SEED", "1"))
+PIPELINE = os.environ.get("CORE", "riscv_core") == "riscv_pipeline"
 N_PROGRAMS = int(os.environ.get("N", "40"))
 MEM_BYTES = 65536
 DATA_LO, DATA_HI = 0x3800, 0x4800        # region reachable by generated loads/stores
@@ -48,6 +49,13 @@ for off in (0, 2):
 for name in ("write_to_x0", "jalr_bit0_ignored", "trap_illegal", "trap_misaligned_load",
              "trap_misaligned_store", "trap_misaligned_jump"):
     cov.define(name)
+if PIPELINE:
+    # hazard-handling paths inside the pipeline (sampled every cycle)
+    for name in ("pipe_load_use_stall", "pipe_branch_flush", "pipe_fwd_mem_rs1",
+                 "pipe_fwd_mem_rs2", "pipe_fwd_wb_rs1", "pipe_fwd_wb_rs2",
+                 "pipe_id_bypass_from_wb", "pipe_trap_squashes_younger",
+                 "pipe_store_then_load"):
+        cov.define(name)
 
 
 def mnemonic(insn):
@@ -142,6 +150,49 @@ def record_coverage(rec):
         cov.hit("jalr_bit0_ignored")
 
 
+async def pipeline_monitor(dut):
+    """White-box coverage of the pipeline's hazard paths."""
+    c = dut.u_core
+
+    def v(h):
+        """Signal as an int, or None while it is still X/Z."""
+        b = str(h.value).lower()
+        return None if set(b) & set("xz") else int(b, 2)
+
+    while True:
+        await RisingEdge(dut.clk)
+        await ReadOnly()
+        if v(dut.rst_n) != 1:
+            continue
+        if v(c.stall) == 1:
+            cov.hit("pipe_load_use_stall")
+        if v(c.redirect) == 1 and v(c.id_valid) == 1:
+            cov.hit("pipe_branch_flush")
+        if v(c.ex_trap) == 1 and v(c.id_valid) == 1:
+            cov.hit("pipe_trap_squashes_younger")
+        if v(c.ex_valid) == 1:
+            rs1, rs2 = v(c.ex_rs1), v(c.ex_rs2)
+            mem_fwd = v(c.mem_fwd_ok) == 1
+            wb_fwd = v(c.wb_fwd_ok) == 1
+            mem_rd, wb_rd = v(c.mem_rd), v(c.wb_rd)
+            if v(c.ex_uses_rs1) == 1:
+                if mem_fwd and mem_rd == rs1:
+                    cov.hit("pipe_fwd_mem_rs1")
+                elif wb_fwd and wb_rd == rs1:
+                    cov.hit("pipe_fwd_wb_rs1")
+            if v(c.ex_uses_rs2) == 1:
+                if mem_fwd and mem_rd == rs2:
+                    cov.hit("pipe_fwd_mem_rs2")
+                elif wb_fwd and wb_rd == rs2:
+                    cov.hit("pipe_fwd_wb_rs2")
+            if v(c.ex_mem_read) == 1 and v(c.mem_valid) == 1 and v(c.mem_wmask):
+                cov.hit("pipe_store_then_load")
+        if v(c.id_valid) == 1 and v(c.wb_we) == 1:
+            wb_rd = v(c.wb_rd)
+            if wb_rd and wb_rd in (v(c.id_rs1), v(c.id_rs2)):
+                cov.hit("pipe_id_bypass_from_wb")
+
+
 async def run_program(dut, words, rng, max_cycles=20000):
     await FallingEdge(dut.clk)
     dut.rst_n.value = 0
@@ -184,6 +235,8 @@ async def run_program(dut, words, rng, max_cycles=20000):
 async def test_random_programs(dut):
     """Random programs that run to their final ECALL."""
     Clock(dut.clk, 10, unit="ns").start()
+    if PIPELINE:
+        cocotb.start_soon(pipeline_monitor(dut))
     total = 0
     for p in range(N_PROGRAMS):
         rng = random.Random(SEED * 1000 + p)
@@ -196,6 +249,8 @@ async def test_random_traps(dut):
     """Programs with misaligned accesses/jumps and illegal instructions mixed in:
     the core must stop at exactly the same instruction as the ISS."""
     Clock(dut.clk, 10, unit="ns").start()
+    if PIPELINE:
+        cocotb.start_soon(pipeline_monitor(dut))
     for p in range(N_PROGRAMS):
         rng = random.Random(SEED * 2000 + p)
         await run_program(dut, rvgen.generate(SEED * 2000 + p, length=300, trap_rate=0.01), rng)

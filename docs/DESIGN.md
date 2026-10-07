@@ -1,6 +1,8 @@
 # Design notes
 
-Why the core is built the way it is, and how each part is verified.
+Why the cores are built the way they are, and how each part is verified.
+Sections 1 to 9 describe the single-cycle core and the shared modules;
+section 10 covers the pipeline.
 
 ## 1. Single cycle, Harvard
 
@@ -149,15 +151,88 @@ first such load).
   0x8000_0004 (address bit 31 selects I/O).
 * All 35 pin assignments were checked against Digilent's master XDC.
 
-## 10. Questions to be ready for
+## 10. The pipelined core (`riscv_pipeline.sv`)
 
-* Walk through the datapath for `lw`, `sw`, `beq` and `jalr`.
-* What is the critical path, and why does the core need distributed RAM?
+### Memory timing
+The pipeline assumes **synchronous memories**: read data arrives the cycle
+after the address, like a block RAM with a registered output. That is what
+lets the FPGA version use block RAM and run at a higher clock. The ports are
+the same as the single-cycle core; only the timing contract differs.
+
+### Fetch with a one-cycle memory
+`imem_addr` is driven combinationally with the address of the instruction ID
+wants next (`pc_q`, or a branch target from EX), and the instruction shows up
+on `imem_rdata` one cycle later, directly in ID. So the block RAM's output
+register acts as the IF/ID register.
+
+During a stall ID must keep its instruction. Rather than relying on the RAM
+holding its output, ID keeps its own copy (`id_instr_q`) and uses it whenever
+it was stalled in the previous cycle (`id_fresh = 0`). `pc_q` does not advance
+while stalled, so when the stall ends the next instruction is already on its
+way. This makes the core work with any memory, including riscv-formal's,
+which may return a different value every cycle.
+
+### Data hazards
+* **Forwarding into EX**: from MEM (the next older instruction) first, then
+  WB. A load in MEM never forwards, because its data only arrives at the end
+  of MEM.
+* **Load-use stall**: if the instruction in ID reads the register a load in EX
+  is about to write, ID and IF hold for one cycle and a bubble enters EX.
+  After that cycle the load is in WB and its value is forwarded. The check
+  uses which source registers the instruction really reads (`uses_rs1/2`),
+  so for example LUI never stalls.
+* **WB->ID bypass**: the register file is written at the end of WB. An
+  instruction reading that register in ID during the same cycle gets the new
+  value through a bypass instead of the stale one.
+
+### Control hazards
+Fetch predicts not-taken. Branches and jumps resolve in EX; a taken one
+drives `imem_addr` with the target in the same cycle and squashes the one
+wrong-path instruction in ID, so the penalty is **one cycle**. The cost is a
+combinational path from the EX comparison to the instruction-memory
+address. If timing needed it, registering the redirect would cut the path at
+the price of a 2-cycle penalty.
+
+### Precise traps
+Every trap cause is known by EX (illegal and ECALL/EBREAK from decode;
+misalignment once the address or target is computed). A trapping
+instruction squashes everything younger (ID and IF), stops fetch, and travels
+to WB with all side effects disabled; older instructions in MEM and WB finish
+normally. Stores are written at the end of EX, which is safe because nothing
+older can still trap at that point.
+
+### What the RVFI port reports
+For each retired instruction the pipeline reports the operand values it
+actually used (after forwarding). For a source field the instruction does not
+read (for example the rs1 bits of LUI), forwarding is not applied, so the
+value could be stale; the pipeline reports register 0 for such fields, as the
+RVFI specification allows. The riscv-formal `reg` check enforces this, and it
+is also the check that caught the "no MEM forwarding" mutation, while
+`insn_add` alone did not. That is why the whole suite is run.
+
+### Performance
+On the 40 riscv-tests programs the pipeline takes 12,706 cycles against
+11,867 for the single-cycle core: **CPI 1.07**, including pipeline fill per
+program, one cycle per taken branch or jump and one per load-use stall. The
+single-cycle core's clock period is set by its full fetch-to-write-back path;
+the pipeline's by roughly one stage, so its throughput is several times
+higher (Vivado timing will put a number on it).
+
+## 11. Questions to be ready for
+
+* Walk through the datapath for `lw`, `sw`, `beq` and `jalr` in each core.
+* What is the single-cycle critical path, and why does it need distributed RAM?
 * Why replicate store data instead of shifting it?
 * Why trap on misaligned accesses? What would supporting them cost?
-* What does riscv-formal prove that riscv-tests do not? What do riscv-tests
-  catch that a formal check with a short depth might not?
-* How does the random test avoid infinite loops, and what does the coverage
-  tell you?
-* How would you add CSRs and real trap handling?
-* What changes in the pipelined version (hazards, forwarding, stalls)?
+* Draw the pipeline. Where does each forwarding path come from, and why does
+  MEM take priority over WB?
+* Why does a load followed by a dependent instruction need a stall, but an
+  ADD followed by one does not?
+* Why is the branch penalty one cycle here and not two? What path does that
+  create?
+* How are traps kept precise? Why is it safe to write stores at the end of EX?
+* Why can the pipeline not rely on the instruction memory holding its output
+  during a stall?
+* What does riscv-formal prove that riscv-tests do not, and vice versa? Why did
+  the `reg` check catch the forwarding bug but `insn_add` did not?
+* How would you add CSRs and real trap handling, or a branch predictor?
