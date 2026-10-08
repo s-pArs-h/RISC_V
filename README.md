@@ -31,7 +31,7 @@ Both run on a Digilent Nexys A7 board. Design notes: [docs/DESIGN.md](docs/DESIG
 | Hazards | none | forwarding MEM->EX and WB->EX, WB->ID bypass, 1-cycle load-use stall |
 | Branches | resolved in the same cycle | predict not-taken, resolved in EX, 1-cycle penalty when taken |
 | CPI on riscv-tests | 1.00 | 1.07 (pipeline fill, taken branches, load-use stalls) |
-| Board clock (default) | 50 MHz | 100 MHz |
+| Board clock (default) | 40 MHz | 80 MHz |
 | Yosys estimate (Artix-7) | 962 LUT, 33 FF, 12 RAM32M | 1424 LUT, 333 FF, 12 RAM32M |
 
 Common to both: all 37 computational, memory and control-flow instructions

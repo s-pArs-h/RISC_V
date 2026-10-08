@@ -3,9 +3,12 @@
 // Nexys A7 (Artix-7) top level for either core.
 //
 //   PIPELINED = 0  single-cycle core; RAM with combinational reads
-//                  (distributed RAM), 50 MHz by default
+//                  (distributed RAM), 40 MHz by default
 //   PIPELINED = 1  5-stage pipeline; RAM with registered reads (block RAM),
-//                  100 MHz by default
+//                  80 MHz by default
+//
+//   Vivado 2025.1 (xc7a100t-1) estimates about 49 MHz and 91 MHz maximum;
+//   the defaults leave margin so timing closes with positive slack.
 //
 //   clock   100 MHz board oscillator -> MMCM -> CORE_MHZ core clock
 //   reset   CPU_RESETN button, synchronised to the core clock
@@ -20,7 +23,7 @@ module top_nexys_a7 #(
     parameter MEM_WORDS = 1024,                 // 4 KiB
     parameter INIT_FILE = "demo.hex",
     /* verilator lint_off UNUSEDPARAM */
-    parameter CORE_MHZ  = (PIPELINED != 0) ? 100 : 50  // unused when SIM bypasses the MMCM
+    parameter CORE_MHZ  = (PIPELINED != 0) ? 80 : 40  // unused when SIM bypasses the MMCM
     /* verilator lint_on UNUSEDPARAM */
 ) (
     input  wire        CLK100MHZ,
