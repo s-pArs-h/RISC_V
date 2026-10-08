@@ -87,8 +87,24 @@ Vivado: create a project for `xc7a100tcsg324-1`, add `rtl/*.sv`,
 `rtl/rv32i_defs.svh`, `fpga/top_nexys_a7.sv`, `fpga/demo.hex` and
 `fpga/nexys_a7.xdc`, set `top_nexys_a7` as top (generic `PIPELINED` selects
 the core) and generate the bitstream. `make fpga-sim` checks both versions in
-simulation. Vivado timing and utilisation will be added here after
-implementation.
+simulation. Vivado 2025.1 results (xc7a100tcsg324-1, placed and routed with the board
+constraints):
+
+| | single-cycle | pipeline |
+|---|---|---|
+| Board clock | 40 MHz | 80 MHz |
+| Worst setup slack at the board clock | +1.467 ns | +0.117 ns |
+| Maximum frequency (estimate) | about 49 MHz | about 91 MHz |
+| LUTs | 2,127 | 1,176 |
+| Flip-flops | 51 | 360 |
+| Block RAM | none | 1 tile |
+
+The maximum frequencies come from runs at 50 and 100 MHz targets, as
+1 / (period - worst slack). The pipeline clocks about 1.8 times faster at
+a CPI of 1.07. The single-cycle core needs combinational memory reads, so
+its 4 KiB RAM is built from LUTs (distributed RAM) and sits in its critical
+path; the pipeline's registered reads use one block RAM tile, which is why
+it also needs fewer LUTs.
 
 ## Running it
 
