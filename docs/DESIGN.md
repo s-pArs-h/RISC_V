@@ -217,22 +217,3 @@ program, one cycle per taken branch or jump and one per load-use stall. The
 single-cycle core's clock period is set by its full fetch-to-write-back path;
 the pipeline's by roughly one stage, so its throughput is several times
 higher (Vivado timing will put a number on it).
-
-## 11. Questions to be ready for
-
-* Walk through the datapath for `lw`, `sw`, `beq` and `jalr` in each core.
-* What is the single-cycle critical path, and why does it need distributed RAM?
-* Why replicate store data instead of shifting it?
-* Why trap on misaligned accesses? What would supporting them cost?
-* Draw the pipeline. Where does each forwarding path come from, and why does
-  MEM take priority over WB?
-* Why does a load followed by a dependent instruction need a stall, but an
-  ADD followed by one does not?
-* Why is the branch penalty one cycle here and not two? What path does that
-  create?
-* How are traps kept precise? Why is it safe to write stores at the end of EX?
-* Why can the pipeline not rely on the instruction memory holding its output
-  during a stall?
-* What does riscv-formal prove that riscv-tests do not, and vice versa? Why did
-  the `reg` check catch the forwarding bug but `insn_add` did not?
-* How would you add CSRs and real trap handling, or a branch predictor?
